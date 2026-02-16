@@ -1,0 +1,7 @@
+
+{
+  "to": "nicolas.manns@gmail.com",
+  "subject": "Test",
+  "content": "<h1>ça marche</h1>",
+  "isHtml": true
+}

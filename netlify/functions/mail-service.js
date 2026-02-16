@@ -8,39 +8,32 @@ function json(statusCode, data) {
   };
 }
 
-export async function handler(event) {
-  if (event.httpMethod !== "POST")
-    return json(405, { ok: false, error: "Method not allowed" });
-
-  
-const expectedRaw = process.env.MAIL_SERVICE_TOKEN;
-const expected = (expectedRaw ?? "").trim();
-
-const receivedRaw =
-  event.headers["x-service-token"] ||
-  event.headers["X-Service-Token"] ||
-  event.headers["x-service-token".toLowerCase()];
-
-const received = (receivedRaw ?? "").trim();
-
-console.log("DEBUG expected_set:", !!expectedRaw, "expected_len:", expected.length);
-console.log("DEBUG received_set:", !!receivedRaw, "received_len:", received.length);
-
-if (!expected) return json(500, { ok: false, error: "MAIL_SERVICE_TOKEN missing" });
-if (!received) return json(401, { ok: false, error: "Missing token header" });
-
-if (received !== expected) {
-  return json(401, {
-    ok: false,
-    error: "Unauthorized",
-    debug: { expected_len: expected.length, received_len: received.length },
-  });
+function looksLikeEmail(s) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || ""));
 }
 
+export async function handler(event) {
+  if (event.httpMethod !== "POST") {
+    return json(405, { ok: false, error: "Method not allowed" });
+  }
 
-  if (!expected || received !== expected)
+  // 🔐 Token check
+  const expected = (process.env.MAIL_SERVICE_TOKEN ?? "").trim();
+  const received = (
+    event.headers["x-service-token"] ||
+    event.headers["X-Service-Token"] ||
+    ""
+  ).trim();
+
+  if (!expected) {
+    return json(500, { ok: false, error: "MAIL_SERVICE_TOKEN missing" });
+  }
+
+  if (!received || received !== expected) {
     return json(401, { ok: false, error: "Unauthorized" });
+  }
 
+  // 📦 Parse body
   let body;
   try {
     body = JSON.parse(event.body || "{}");
@@ -50,6 +43,15 @@ if (received !== expected) {
 
   const { to, subject, content, isHtml = true } = body;
 
+  if (!looksLikeEmail(to)) {
+    return json(400, { ok: false, error: "Invalid recipient email" });
+  }
+
+  if (!subject || !content) {
+    return json(400, { ok: false, error: "Missing subject or content" });
+  }
+
+  // 📬 SMTP
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT),
@@ -70,7 +72,7 @@ if (received !== expected) {
 
     return json(200, { ok: true, messageId: info.messageId });
   } catch (err) {
-    console.error(err);
+    console.error("SMTP error:", err);
     return json(502, { ok: false, error: "SMTP failed" });
   }
 }
