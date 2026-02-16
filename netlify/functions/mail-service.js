@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 function json(statusCode, data) {
   return {
     statusCode,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify(data),
   };
 }
@@ -20,18 +20,13 @@ export async function handler(event) {
   // 🔐 Token check
   const expected = (process.env.MAIL_SERVICE_TOKEN ?? "").trim();
   const received = (
-    event.headers["x-service-token"] ||
-    event.headers["X-Service-Token"] ||
+    event.headers?.["x-service-token"] ||
+    event.headers?.["X-Service-Token"] ||
     ""
   ).trim();
 
-  if (!expected) {
-    return json(500, { ok: false, error: "MAIL_SERVICE_TOKEN missing" });
-  }
-
-  if (!received || received !== expected) {
-    return json(401, { ok: false, error: "Unauthorized" });
-  }
+  if (!expected) return json(500, { ok: false, error: "MAIL_SERVICE_TOKEN missing" });
+  if (!received || received !== expected) return json(401, { ok: false, error: "Unauthorized" });
 
   // 📦 Parse body
   let body;
@@ -41,30 +36,36 @@ export async function handler(event) {
     return json(400, { ok: false, error: "Invalid JSON" });
   }
 
-  const { to, subject, content, isHtml = true } = body;
+  const to = String(body?.to ?? "").trim();
+  const subject = String(body?.subject ?? "").trim();
+  const content = String(body?.content ?? "").trim();
+  const isHtml = body?.isHtml ?? true;
 
-  if (!looksLikeEmail(to)) {
-    return json(400, { ok: false, error: "Invalid recipient email" });
+  if (!looksLikeEmail(to)) return json(400, { ok: false, error: "Invalid recipient email" });
+  if (!subject || !content) return json(400, { ok: false, error: "Missing subject or content" });
+
+  // 📬 SMTP config
+  const host = (process.env.SMTP_HOST ?? "").trim();
+  const port = Number(process.env.SMTP_PORT ?? "");
+  const secure = (process.env.SMTP_SECURE ?? "").trim() === "true";
+  const user = (process.env.SMTP_USER ?? "").trim();
+  const pass = (process.env.SMTP_PASS ?? "").trim();
+  const from = (process.env.SMTP_FROM ?? "").trim();
+
+  if (!host || !port || !user || !pass || !from) {
+    return json(500, { ok: false, error: "SMTP config missing" });
   }
 
-  if (!subject || !content) {
-    return json(400, { ok: false, error: "Missing subject or content" });
-  }
-
-  // 📬 SMTP
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: process.env.SMTP_SECURE === "true",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
+    host,
+    port,
+    secure,
+    auth: { user, pass },
   });
 
   try {
     const info = await transporter.sendMail({
-      from: process.env.SMTP_FROM,
+      from,
       to,
       subject,
       ...(isHtml ? { html: content } : { text: content }),
