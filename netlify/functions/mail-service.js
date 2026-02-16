@@ -72,8 +72,10 @@ export async function handler(event) {
     });
 
     return json(200, { ok: true, messageId: info.messageId });
-  } catch (err) {
-    console.error("SMTP error:", err);
-    return json(502, { ok: false, error: "SMTP failed" });
-  }
+} catch (err) {
+  console.error("SMTP error name:", err?.name);
+  console.error("SMTP error code:", err?.code);
+  console.error("SMTP error message:", err?.message);
+  return json(502, { ok: false, error: "SMTP failed" });
+}
 }
