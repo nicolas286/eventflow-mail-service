@@ -12,12 +12,35 @@ function looksLikeEmail(s) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || ""));
 }
 
+function normalizeAttachments(input) {
+  if (!Array.isArray(input) || input.length === 0) return [];
+
+  return input
+    .map((a) => {
+      const filename = String(a?.filename ?? "").trim();
+      const contentBase64 = String(a?.contentBase64 ?? "").trim();
+      const contentType = String(a?.contentType ?? "application/octet-stream").trim();
+
+      if (!filename || !contentBase64) return null;
+
+      try {
+        return {
+          filename,
+          content: Buffer.from(contentBase64, "base64"),
+          contentType,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 export async function handler(event) {
   if (event.httpMethod !== "POST") {
     return json(405, { ok: false, error: "Method not allowed" });
   }
 
-  // 🔐 Token check
   const expected = (process.env.MAIL_SERVICE_TOKEN ?? "").trim();
   const received = (
     event.headers?.["x-service-token"] ||
@@ -28,7 +51,6 @@ export async function handler(event) {
   if (!expected) return json(500, { ok: false, error: "MAIL_SERVICE_TOKEN missing" });
   if (!received || received !== expected) return json(401, { ok: false, error: "Unauthorized" });
 
-  // 📦 Parse body
   let body;
   try {
     body = JSON.parse(event.body || "{}");
@@ -40,11 +62,11 @@ export async function handler(event) {
   const subject = String(body?.subject ?? "").trim();
   const content = String(body?.content ?? "").trim();
   const isHtml = body?.isHtml ?? true;
+  const attachments = normalizeAttachments(body?.attachments);
 
   if (!looksLikeEmail(to)) return json(400, { ok: false, error: "Invalid recipient email" });
   if (!subject || !content) return json(400, { ok: false, error: "Missing subject or content" });
 
-  // 📬 SMTP config
   const host = (process.env.SMTP_HOST ?? "").trim();
   const port = Number(process.env.SMTP_PORT ?? "");
   const secure = (process.env.SMTP_SECURE ?? "").trim() === "true";
@@ -69,13 +91,18 @@ export async function handler(event) {
       to,
       subject,
       ...(isHtml ? { html: content } : { text: content }),
+      ...(attachments.length ? { attachments } : {}),
     });
 
-    return json(200, { ok: true, messageId: info.messageId });
-} catch (err) {
-  console.error("SMTP error name:", err?.name);
-  console.error("SMTP error code:", err?.code);
-  console.error("SMTP error message:", err?.message);
-  return json(502, { ok: false, error: "SMTP failed" });
-}
+    return json(200, {
+      ok: true,
+      messageId: info.messageId,
+      attachmentsCount: attachments.length,
+    });
+  } catch (err) {
+    console.error("SMTP error name:", err?.name);
+    console.error("SMTP error code:", err?.code);
+    console.error("SMTP error message:", err?.message);
+    return json(502, { ok: false, error: "SMTP failed" });
+  }
 }
