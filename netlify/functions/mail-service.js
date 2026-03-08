@@ -85,6 +85,17 @@ export async function handler(event) {
     auth: { user, pass },
   });
 
+  console.log("SMTP send meta:", {
+  to,
+  subject,
+  attachmentsCount: attachments.length,
+  attachments: attachments.map(a => ({
+    filename: a.filename,
+    size: a.content?.length ?? 0,
+    contentType: a.contentType,
+  })),
+});
+
   try {
     const info = await transporter.sendMail({
       from,
