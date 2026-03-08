@@ -103,6 +103,16 @@ export async function handler(event) {
     console.error("SMTP error name:", err?.name);
     console.error("SMTP error code:", err?.code);
     console.error("SMTP error message:", err?.message);
+    console.error("SMTP meta:", {
+        to,
+        subject,
+        attachmentsCount: attachments.length,
+        attachments: attachments.map(a => ({
+          filename: a.filename,
+          size: a.content?.length ?? 0,
+          contentType: a.contentType,
+        })),
+      });
     return json(502, { ok: false, error: "SMTP failed" });
   }
 }
